@@ -515,7 +515,6 @@ class PlayerRuntimeController(
 
     internal var lastSavedPosition: Long = 0L
     internal val saveThresholdMs = 5000L
-    @Volatile
     internal var hasMarkedCurrentEpisodeCompleted: Boolean = false
     internal var lastKnownDuration: Long = 0L
 
