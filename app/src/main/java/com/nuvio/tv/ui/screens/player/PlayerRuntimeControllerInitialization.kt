@@ -488,7 +488,11 @@ internal fun PlayerRuntimeController.initializePlayer(
             // and shrink the budget at first frame (below).
             val libdoviConversionActive = effectiveDv7Mode == Dv7HandlingMode.DV81_LIBDOVI
             NuvioExoPlayerPerformanceHelper.updateSettings(playerSettings, context)
-            NuvioExoPlayerPerformanceHelper.enabled = playerSettings.nuvioPerformanceModeEnabled
+            NuvioExoPlayerPerformanceHelper.configureEngine(
+                nativeMemoryEnabled = playerSettings.nuvioPerformanceModeEnabled,
+                decoupledPlaybackEnabled = playerSettings.effectiveExoDecoupledPlaybackEnabled && !tunnelingActive,
+                cpuCoreIsolationEnabled = playerSettings.exoCpuCoreIsolationEnabled
+            )
             val streamMime = currentStreamMimeType
             val isHls = streamMime != null && (
                 streamMime.equals(MimeTypes.APPLICATION_M3U8, ignoreCase = true) ||
@@ -939,6 +943,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
                 preferSoftwareAudioOnly = isBluetoothAudioOutput,
+                tunnelingEnabled = tunnelingActive && !safeAudioModeEnabled,
                 mapDv7ToHevc = mapDv7ToHevcEnabled,
                 onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it },
                 onFfmpegAudioRendererChanged = { renderer ->
@@ -2203,6 +2208,7 @@ private class SubtitleOffsetRenderersFactory(
      * platform MediaCodec path so Bluetooth PCM policy does not force software video decode.
      */
     private val preferSoftwareAudioOnly: Boolean = false,
+    private val tunnelingEnabled: Boolean = false,
     private val mapDv7ToHevc: Boolean = false,
     private val onPlaybackSpeedAwareAudioSinkCreated: (PlaybackSpeedAwareAudioSink) -> Unit,
     private val onFfmpegAudioRendererChanged: (FfmpegAudioRenderer?) -> Unit,
@@ -2278,7 +2284,15 @@ private class SubtitleOffsetRenderersFactory(
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(gainAudioProcessor, nightModeAudioProcessor))
-        val baseAudioSink = AsyncAudioSink.wrap(builder.build())
+        val rawAudioSink = builder.build()
+        val baseAudioSink = if (
+            androidx.media3.common.NuvioEngineConfig.get().isAsyncAudioSinkEnabled() &&
+            !tunnelingEnabled
+        ) {
+            AsyncAudioSink.wrap(rawAudioSink)
+        } else {
+            rawAudioSink
+        }
         // Audio sync hook: tap the base sink so the returned sink stays a PlaybackSpeedAwareAudioSink
         // and buildAudioRenderers keeps installing PlaybackSpeedAwareAudioRenderer.
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(

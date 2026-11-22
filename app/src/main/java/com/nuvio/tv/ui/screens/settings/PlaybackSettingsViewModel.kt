@@ -636,4 +636,12 @@ class PlaybackSettingsViewModel @Inject constructor(
     suspend fun setNuvioPerformanceModeEnabled(enabled: Boolean) {
         playerSettingsDataStore.setNuvioPerformanceModeEnabled(enabled)
     }
+
+    suspend fun setExoDecoupledPlaybackEnabled(enabled: Boolean) {
+        playerSettingsDataStore.setExoDecoupledPlaybackEnabled(enabled)
+    }
+
+    suspend fun setExoCpuCoreIsolationEnabled(enabled: Boolean) {
+        playerSettingsDataStore.setExoCpuCoreIsolationEnabled(enabled)
+    }
 }

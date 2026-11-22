@@ -29,13 +29,6 @@ import com.nuvio.tv.ui.screens.settings.MemoryBudget
 @androidx.media3.common.util.UnstableApi
 object NuvioExoPlayerPerformanceHelper {
 
-    init {
-        // Always keep decoupled A/V sync active (dedicated AudioSink thread, async video
-        // output release, throttled SampleQueue discard, fair renderer time slice), even
-        // when the native off-heap allocator / zero-copy performance mode is off.
-        NuvioEngineConfig.set(NuvioEngineConfig.stockWithDecoupledAvSync())
-    }
-
     /** Whether Nuvio performance enhancements are active. Set from [PlayerSettingsDataStore]. */
     @Volatile
     var enabled: Boolean = false
@@ -43,7 +36,23 @@ object NuvioExoPlayerPerformanceHelper {
             val supported = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
             val newValue = value && supported
             field = newValue
-            applyEngineConfig(newValue)
+            applyEngineConfig()
+        }
+
+    /** Whether the opt-in decoupled ExoPlayer playback & async audio engine is active. */
+    @Volatile
+    var decoupledPlaybackEnabled: Boolean = false
+        set(value) {
+            field = value
+            applyEngineConfig()
+        }
+
+    /** Whether symmetric >=4-core SoCs should opt into upper-core CPU isolation. */
+    @Volatile
+    var cpuCoreIsolationEnabled: Boolean = false
+        set(value) {
+            field = value
+            applyEngineConfig()
         }
 
     // Rebuilding this on a settings change handed already built data sources a pool that nothing
@@ -440,17 +449,45 @@ object NuvioExoPlayerPerformanceHelper {
     // ─── Engine Config ───────────────────────────────────────────────────────
 
     /**
-     * Applies [NuvioEngineConfig] based on the toggle state.
-     * When enabled: native off-heap allocation + zero-copy ByteBuffer pipeline + 64 KB scratch.
-     * When disabled: stock heap allocation + standard byte[] pipeline + 4 KB scratch.
+     * Applies [NuvioEngineConfig] from the independent native-memory, decoupled playback, and
+     * symmetric CPU core isolation opt-in toggles.
      *
      * Must be called **before** building an ExoPlayer instance.
      */
-    private fun applyEngineConfig(performanceModeEnabled: Boolean) {
-        if (performanceModeEnabled) {
-            NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode())
+    fun configureEngine(
+        nativeMemoryEnabled: Boolean,
+        decoupledPlaybackEnabled: Boolean,
+        cpuCoreIsolationEnabled: Boolean
+    ) {
+        val supportedNative = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+        enabled = nativeMemoryEnabled && supportedNative
+        this.decoupledPlaybackEnabled = decoupledPlaybackEnabled
+        this.cpuCoreIsolationEnabled = cpuCoreIsolationEnabled
+        applyEngineConfig()
+    }
+
+    private fun applyEngineConfig() {
+        val builder = NuvioEngineConfig.Builder()
+        if (enabled) {
+            builder
+                .setAllocationMode(NuvioEngineConfig.AllocationMode.NATIVE_OFF_HEAP)
+                .setDataPipelineMode(NuvioEngineConfig.DataPipelineMode.ZERO_COPY)
+                .setExtractorScratchSize(NuvioEngineConfig.NUVIO_EXTRACTOR_SCRATCH_SIZE)
         } else {
-            NuvioEngineConfig.set(NuvioEngineConfig.stockWithDecoupledAvSync())
+            builder
+                .setAllocationMode(NuvioEngineConfig.AllocationMode.STOCK_HEAP)
+                .setDataPipelineMode(NuvioEngineConfig.DataPipelineMode.STOCK)
+                .setExtractorScratchSize(NuvioEngineConfig.STOCK_EXTRACTOR_SCRATCH_SIZE)
         }
+        builder.setSymmetricUpperCorePinningEnabled(cpuCoreIsolationEnabled)
+        if (decoupledPlaybackEnabled) {
+            builder
+                .setAsyncAudioSinkEnabled(true)
+                .setAsyncVideoReleaseEnabled(true)
+                .setRealtimePlaybackThreadEnabled(true)
+                .setDiscardBufferThrottleMs(NuvioEngineConfig.DEFAULT_DISCARD_BUFFER_THROTTLE_MS)
+                .setRendererTimeLimitMs(NuvioEngineConfig.DEFAULT_RENDERER_TIME_LIMIT_MS)
+        }
+        NuvioEngineConfig.set(builder.build())
     }
 }
